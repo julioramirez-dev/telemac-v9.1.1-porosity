@@ -289,19 +289,42 @@
       INTEGER I1,I2,I3,DIMLIM,DIMGLO,N,IOPT,DISCLIN
 !
       DOUBLE PRECISION Z(1),SL1,SL1U,C,FL1,FL2
+      DOUBLE PRECISION PHIVEG
 !
       LOGICAL MSKGRA
+      LOGICAL VEGETATION_POROSITY
 !
       CHARACTER(LEN=16) FORMUL
 !
-!-----------------------------------------------------------------------
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+!                           VEGETATION
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 !
       IF(LT.EQ.1) THEN
          WRITE(LU,*) '======================================'
          WRITE(LU,*) ' MI PROPAG.F EXTERNO ESTA FUNCIONANDO '
          WRITE(LU,*) '======================================'
       ENDIF
-
+!
+!
+!     .TRUE.  : ACTIVATES VEGETATION POROSITY
+!     .FALSE. : STANDARD TELEMAC EQUATIONS
+!
+      VEGETATION_POROSITY = .TRUE.
+      PHIVEG = 0.70D0
+!
+!     KEEP VEGETATION POROSITY SEPARATE FROM DELFINA/TIDAL-FLAT
+!     POROSITY (OPTBAN=3).
+!
+      IF(VEGETATION_POROSITY.AND.OPTBAN.EQ.3) THEN
+        WRITE(LU,*) 'VEGETATION POROSITY AND OPTBAN=3'
+        WRITE(LU,*) 'CANNOT BE USED TOGETHER IN THIS TEST'
+        CALL PLANTE(1)
+        STOP
+      ENDIF
+!
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+!
       DIMLIM=LIMPRO%DIM1
       DIMGLO=MESH%GLOSEG%DIM1
 !
@@ -362,6 +385,43 @@
      &                MESH,.TRUE.,TE5)
         ENDIF
 !
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+!                           VEGETATION
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      ELSEIF(VEGETATION_POROSITY) THEN
+!
+!       VEGETATION POROSITY IN THE CONTINUITY FLUX
+!
+        CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
+     &              TETAU*PHIVEG,HPROP,S,S,S,S,S,
+     &              MESH,MSK,MASKEL)
+        CALL MATRIX(BM2,'M=N     ','MATFGR         Y',IELMH,IELMU,
+     &              TETAU*PHIVEG,HPROP,S,S,S,S,S,
+     &              MESH,MSK,MASKEL)
+!
+!       SUPG CONTRIBUTIONS ARE PART OF THE SAME CONTINUITY FLUX,
+!       SO THEY ARE MULTIPLIED BY THE SAME CONSTANT POROSITY.
+!
+        IF(OPTSUP(2).EQ.1) THEN
+          CALL KSUPG(TE1,TE2,1.D0,UCONV,VCONV,MESH)
+          CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',IELMH,IELMU,
+     &                TETAU*PHIVEG,HPROP,S,S,TE1,TE2,S,
+     &                MESH,MSK,MASKEL)
+          CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',IELMH,IELMU,
+     &                TETAU*PHIVEG,HPROP,S,S,TE1,TE2,S,
+     &                MESH,MSK,MASKEL)
+        ELSEIF(OPTSUP(2).EQ.2) THEN
+          CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',IELMH,IELMU,
+     &                0.5D0*DT*TETAU*PHIVEG,
+     &                HPROP,S,S,UCONV,VCONV,S,
+     &                MESH,MSK,MASKEL)
+          CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',IELMH,IELMU,
+     &                0.5D0*DT*TETAU*PHIVEG,
+     &                HPROP,S,S,UCONV,VCONV,S,
+     &                MESH,MSK,MASKEL)
+        ENDIF
+!
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
       ELSE
 !
         CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
@@ -539,12 +599,32 @@
 !       NORMAL MASS MATRIX
         FORMUL='MATMAS          '
       ENDIF
-      IF(OPTBAN.NE.3) THEN
-        CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
-     &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)
-      ELSE
+!
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+!                           VEGETATION
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      IF(OPTBAN.EQ.3) THEN
+!
+!       TELEMAC TIDAL-FLAT POROSITY
+!
         CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
      &              SL1,TE3,S,S,S,S,S,MESH,.TRUE.,TE5)
+!
+      ELSEIF(VEGETATION_POROSITY) THEN
+!
+!       VEGETATION POROSITY
+!
+        CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
+     &              SL1*PHIVEG,TE3,S,S,S,S,S,
+     &              MESH,MSK,MASKEL)
+!
+      ELSE
+!
+!       STANDARD TELEMAC
+!
+        CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
+     &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)
+!
       ENDIF
 !
 !   MASS MATRIX FOR THE MOMENTUM EQUATION
@@ -552,7 +632,8 @@
       IF(SOLSYS.EQ.1) THEN
 !
 !                           OPTBAN.NE.3 TO AVOID POROSITY IN AM2
-      IF(IELMU.EQ.IELMH.AND.OPTBAN.NE.3) THEN
+      IF(IELMU.EQ.IELMH.AND.OPTBAN.NE.3.AND.
+     &   .NOT.VEGETATION_POROSITY) THEN
         CALL OM('M=N     ', M=AM2, N=AM1, MESH=MESH)
       ELSE
         CALL MATRIX(AM2,'M=N     ',FORMUL,IELMU,IELMU,
@@ -1095,8 +1176,17 @@
             FLBOR%R(I)=FLBOR%R(I)*TE5%R(N)
           ENDIF
         ENDDO
-      ENDIF
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+!                           VEGETATION
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      ELSEIF(VEGETATION_POROSITY) THEN
 !
+!       VEGETATION POROSITY
+!
+        CALL OS('X=CX    ',X=FLBOR,C=PHIVEG)
+!
+      ENDIF
+!+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 !     END OF: IF(MESH%NPTFR.GT.0) THEN
       ENDIF
 !

@@ -28,7 +28,7 @@ TITLE = 'DRAGFORCE TEST CASE'
 /
 FORTRAN FILE             : 'user_fortran'
 BOUNDARY CONDITIONS FILE : geo_dragforce.cli
-GEOMETRY FILE            : geo_dragforce.slf
+GEOMETRY FILE            : geo_porosity.slf
 RESULTS FILE             : r2d_dragforce.slf
 /
 /----------------------------------------------------------------------
@@ -82,3 +82,10 @@ MASS-LUMPING ON H : 1.
 /
 / DEFAULT VALUE UNTIL V8P5 KEPT FOR NON REGRESSION
 TREATMENT OF NEGATIVE DEPTHS = 1
+NUMBER OF PRIVATE ARRAYS = 1
+/
+/----------------------------------------------------------------------
+/                         OPTIONS NUMERIQUES
+/----------------------------------------------------------------------
+/
+NAMES OF PRIVATE VARIABLES = 'POROSITY'

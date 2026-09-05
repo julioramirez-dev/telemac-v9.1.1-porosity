@@ -224,6 +224,9 @@
 !
       USE DECLARATIONS_SPECIAL
       USE INTERFACE_PARALLEL, ONLY : P_SUM
+!==================== MODIFICACIÓN PROPIA ====================
+      USE MOD_FIND_VARIABLE
+!================== FIN MODIFICACIÓN PROPIA ==================
       IMPLICIT NONE
 !
 !+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+

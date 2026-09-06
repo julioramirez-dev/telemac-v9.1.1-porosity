@@ -63,8 +63,6 @@ PRESCRIBED ELEVATIONS : 4.;0.
 /                         OPTIONS NUMERIQUES
 /----------------------------------------------------------------------
 /
-TIDAL FLATS : YES
-OPTION FOR THE TREATMENT OF TIDAL FLATS : 3
 TURBULENCE MODEL : 3
 VELOCITY DIFFUSIVITY : 1.E-6
 /

@@ -210,6 +210,9 @@
      & NDGA1,NDGB1,NWEIRS,NPSING,HFROT,FLULIM,YAFLULIM,
      & FLULIMEBE,YAFLULIMEBE,RAIN,PLUIE,
      & MAXADV,OPTADV_VI,IKLE,NELMAX)
+!=====================MODIFICACIÓN PROPIA ====================
+!     & CHESTR)
+!===================FIN MODIFICACIÓN PROPIA ==================
 !
       USE BIEF
       USE DECLARATIONS_TELEMAC, ONLY : ADV_CAR,ADV_SUP,ADV_NSC,ADV_PSI,
@@ -218,15 +221,16 @@
      &                                 KDDL
       USE DECLARATIONS_TELEMAC2D, ONLY : TYPSEUIL,IT1,IT2,TB2,NCO_DIST,
      & NSP_DIST,DEBU,TROUVE,II01,II02,XTMP01
+!=====================MODIFICACIÓN PROPIA ====================
+!     variable porosidad
+     & ,PRIVE
+!===================FIN MODIFICACIÓN PROPIA ==================
       USE DECLARATIONS_TELEMAC, ONLY : MODASS
 !
       USE INTERFACE_TELEMAC2D, EX_PROPAG => PROPAG
 !
       USE DECLARATIONS_SPECIAL
       USE INTERFACE_PARALLEL, ONLY : P_SUM
-!==================== MODIFICACIÓN PROPIA ====================
-      USE MOD_FIND_VARIABLE
-!================== FIN MODIFICACIÓN PROPIA ==================
       IMPLICIT NONE
 !
 !+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -296,6 +300,9 @@
       LOGICAL MSKGRA
 !
       CHARACTER(LEN=16) FORMUL
+!==================== MODIFICACIÓN PROPIA ====================
+      LOGICAL, PARAMETER :: VEGETATION_POROSITY = .TRUE.
+!===================FIN MODIFICACIÓN PROPIA ==================
 !
 !-----------------------------------------------------------------------
 !
@@ -359,6 +366,51 @@
      &                MESH,.TRUE.,TE5)
         ENDIF
 !
+!=====================MODIFICACIÓN PROPIA ====================
+      ELSEIF(VEGETATION_POROSITY) THEN
+!     mesaje de uso de vegetation
+         IF(LT.EQ.1.AND.ISOUSI.EQ.1) THEN
+            WRITE(LU,1002)
+         ENDIF
+ 1002    FORMAT(1X,/,
+     &        19X,'==========================================',/,
+     &        19X,'MI POROSITY PROPAG ESTA FUNCIONANDO',/,
+     &        19X,'==========================================',/)
+!     PHI * H
+         DO I = 1,MESH%NPOIN
+            T1%R(I) = PRIVE%ADR(1)%P%R(I) * HPROP%R(I)
+         ENDDO
+
+         CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
+     &        TETAU,T1,S,S,S,S,S,MESH,MSK,MASKEL)
+         CALL MATRIX(BM2,'M=N     ','MATFGR         Y',IELMH,IELMU,
+     &        TETAU,T1,S,S,S,S,S,MESH,MSK,MASKEL)
+
+!     SUPG
+         IF(OPTSUP(2).EQ.1) THEN
+            CALL KSUPG(TE1,TE2,1.D0,UCONV,VCONV,MESH)
+            CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',
+     &           IELMH,IELMU,
+     &           TETAU,T1,S,S,TE1,TE2,S,
+     &           MESH,MSK,MASKEL)
+            CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',
+     &           IELMH,IELMU,
+     &           TETAU,T1,S,S,TE1,TE2,S,
+     &           MESH,MSK,MASKEL)
+            
+         ELSEIF(OPTSUP(2).EQ.2) THEN
+            CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',
+     &           IELMH,IELMU,
+     &           0.5D0*DT*TETAU,T1,
+     &           S,S,UCONV,VCONV,S,
+     &           MESH,MSK,MASKEL)
+            CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',
+     &           IELMH,IELMU,
+     &           0.5D0*DT*TETAU,T1,
+     &           S,S,UCONV,VCONV,S,
+     &           MESH,MSK,MASKEL)
+         ENDIF
+!===================FIN MODIFICACIÓN PROPIA ==================
       ELSE
 !
         CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
@@ -539,6 +591,27 @@
       IF(OPTBAN.NE.3) THEN
         CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
      &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)
+!======================MODIFICACIÓN PROPIA =============================
+!     VEGETATION POROSITY EN TERMINO TEMPORAL:
+!     D(PHI*H)/DT = PHI * DH/DT
+!
+      ELSEIF(VEGETATION_POROSITY) THEN
+!     NODAL POROSITY -> ELEMENT POROSITY
+         DO IELEM=1,MESH%NELEM
+            I1=IKLE(IELEM,1)
+            I2=IKLE(IELEM,2)
+            I3=IKLE(IELEM,3)
+            TE1%R(IELEM) =
+     &           ( PRIVE%ADR(1)%P%R(I1)
+     &           + PRIVE%ADR(1)%P%R(I2)
+     &           + PRIVE%ADR(1)%P%R(I3) ) / 3.D0
+         ENDDO
+!     AM1 = PHI / DT * MASS MATRIX
+         CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
+     &        SL1,TE3,S,S,S,S,S,
+     &        MESH,.TRUE.,TE1)
+!====================FIN MODIFICACIÓN PROPIA ===========================
+
       ELSE
         CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
      &              SL1,TE3,S,S,S,S,S,MESH,.TRUE.,TE5)
@@ -551,6 +624,10 @@
 !                           OPTBAN.NE.3 TO AVOID POROSITY IN AM2
       IF(IELMU.EQ.IELMH.AND.OPTBAN.NE.3) THEN
         CALL OM('M=N     ', M=AM2, N=AM1, MESH=MESH)
+!======================MODIFICACIÓN PROPIA =============================
+      ELSEIF(VEGETATION_POROSITY) THEN
+        CALL OM('M=N     ', M=AM2, N=AM1, MESH=MESH)
+!====================FIN MODIFICACIÓN PROPIA ===========================
       ELSE
         CALL MATRIX(AM2,'M=N     ',FORMUL,IELMU,IELMU,
      &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)

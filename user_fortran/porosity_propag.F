@@ -210,9 +210,6 @@
      & NDGA1,NDGB1,NWEIRS,NPSING,HFROT,FLULIM,YAFLULIM,
      & FLULIMEBE,YAFLULIMEBE,RAIN,PLUIE,
      & MAXADV,OPTADV_VI,IKLE,NELMAX)
-!=====================MODIFICACIÓN PROPIA ====================
-!     & CHESTR)
-!===================FIN MODIFICACIÓN PROPIA ==================
 !
       USE BIEF
       USE DECLARATIONS_TELEMAC, ONLY : ADV_CAR,ADV_SUP,ADV_NSC,ADV_PSI,
@@ -302,6 +299,8 @@
       CHARACTER(LEN=16) FORMUL
 !==================== MODIFICACIÓN PROPIA ====================
       LOGICAL, PARAMETER :: VEGETATION_POROSITY = .TRUE.
+      TYPE(BIEF_OBJ), SAVE :: T9
+      LOGICAL, SAVE :: T9_CREATED = .FALSE.
 !===================FIN MODIFICACIÓN PROPIA ==================
 !
 !-----------------------------------------------------------------------
@@ -312,6 +311,40 @@
       IELMH=H%ELM
       IELMU=U%ELM
 !
+!======================MODIFICACIÓN PROPIA =============================
+!     OPTBAN=3 AND VEGETATION POROSITY ARE MUTUALLY EXCLUSIVE
+!
+      IF(OPTBAN.EQ.3.AND.VEGETATION_POROSITY) THEN
+        WRITE(LU,*) '=============================================='
+        WRITE(LU,*) 'ERROR: INCOMPATIBLE POROSITY OPTIONS'
+        WRITE(LU,*) 'OPTBAN = 3 AND VEGETATION_POROSITY = TRUE'
+        WRITE(LU,*) 'CANNOT BE USED AT THE SAME TIME'
+        WRITE(LU,*) '=============================================='
+        CALL PLANTE(1)
+        STOP
+      ENDIF
+!     VEGETATION POROSITY
+!     T9 = PHI * HPROP
+      IF(VEGETATION_POROSITY) THEN
+         IF(.NOT.T9_CREATED) THEN
+            CALL BIEF_ALLVEC(1,T9,'T9      ',IELMH,1,1,MESH)
+            T9_CREATED=.TRUE.
+         ENDIF
+         
+         CALL OS('X=YZ    ',
+     &        X=T9,
+     &        Y=PRIVE%ADR(1)%P,
+     &        Z=HPROP)
+!     mesaje de uso de vegetation
+         IF(LT.EQ.1.AND.ISOUSI.EQ.1) THEN
+            WRITE(LU,1002)
+         ENDIF
+ 1002    FORMAT(1X,/,
+     &        19X,'==========================================',/,
+     &        19X,'MI POROSITY PROPAG ESTA FUNCIONANDO',/,
+     &        19X,'==========================================',/)        
+      ENDIF
+!====================FIN MODIFICACIÓN PROPIA ===========================
 !  ADDRESSES OF THE ARRAYS IN THE MASKING BLOCK: MASK
 !
       UDIR = 1
@@ -368,45 +401,39 @@
 !
 !=====================MODIFICACIÓN PROPIA ====================
       ELSEIF(VEGETATION_POROSITY) THEN
-!     mesaje de uso de vegetation
-         IF(LT.EQ.1.AND.ISOUSI.EQ.1) THEN
-            WRITE(LU,1002)
-         ENDIF
- 1002    FORMAT(1X,/,
-     &        19X,'==========================================',/,
-     &        19X,'MI POROSITY PROPAG ESTA FUNCIONANDO',/,
-     &        19X,'==========================================',/)
+!     CREATE T9 ONLY ONCE
 !     PHI * H
-         DO I = 1,MESH%NPOIN
-            T1%R(I) = PRIVE%ADR(1)%P%R(I) * HPROP%R(I)
-         ENDDO
+         CALL OS('X=YZ    ',
+     &        X=T9,
+     &        Y=PRIVE%ADR(1)%P,
+     &        Z=HPROP)
 
          CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
-     &        TETAU,T1,S,S,S,S,S,MESH,MSK,MASKEL)
+     &        TETAU,T9,S,S,S,S,S,MESH,MSK,MASKEL)
          CALL MATRIX(BM2,'M=N     ','MATFGR         Y',IELMH,IELMU,
-     &        TETAU,T1,S,S,S,S,S,MESH,MSK,MASKEL)
+     &        TETAU,T9,S,S,S,S,S,MESH,MSK,MASKEL)
 
 !     SUPG
          IF(OPTSUP(2).EQ.1) THEN
             CALL KSUPG(TE1,TE2,1.D0,UCONV,VCONV,MESH)
             CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',
      &           IELMH,IELMU,
-     &           TETAU,T1,S,S,TE1,TE2,S,
+     &           TETAU,T9,S,S,TE1,TE2,S,
      &           MESH,MSK,MASKEL)
             CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',
      &           IELMH,IELMU,
-     &           TETAU,T1,S,S,TE1,TE2,S,
+     &           TETAU,T9,S,S,TE1,TE2,S,
      &           MESH,MSK,MASKEL)
             
          ELSEIF(OPTSUP(2).EQ.2) THEN
             CALL MATRIX(BM1,'M=M+N   ','MATUGH         X',
      &           IELMH,IELMU,
-     &           0.5D0*DT*TETAU,T1,
+     &           0.5D0*DT*TETAU,T9,
      &           S,S,UCONV,VCONV,S,
      &           MESH,MSK,MASKEL)
             CALL MATRIX(BM2,'M=M+N   ','MATUGH         Y',
      &           IELMH,IELMU,
-     &           0.5D0*DT*TETAU,T1,
+     &           0.5D0*DT*TETAU,T9,
      &           S,S,UCONV,VCONV,S,
      &           MESH,MSK,MASKEL)
          ENDIF
@@ -448,39 +475,71 @@
         IF(OPDVIT.EQ.2) THEN
 !         SAVES DIFFUSION
           CALL OS('X=Y     ',X=VISC_S,Y=VISC)
-!         MULTIPLIES DIFFUSION BY HPROP
-          CALL OV_2('X=XY    ',VISC%R,1,HPROP%R,1,Z,1,C,
-     &                         VISC%MAXDIM1,VISC%DIM1)
-          IF(VISC%DIM2.EQ.3) THEN
-            CALL OV_2('X=XY    ',VISC%R,2,HPROP%R,1,Z,1,C,
-     &                           VISC%MAXDIM1,VISC%DIM1)
-            CALL OV_2('X=XY    ',VISC%R,3,HPROP%R,1,Z,1,C,
-     &                           VISC%MAXDIM1,VISC%DIM1)
+!=====================MODIFICACIÓN PROPIA ====================
+          IF(VEGETATION_POROSITY) THEN
+             CALL OV_2('X=XY    ',VISC%R,1,T9%R,1,Z,1,C,
+     &            VISC%MAXDIM1,VISC%DIM1)
+             
+             IF(VISC%DIM2.EQ.3) THEN
+                CALL OV_2('X=XY    ',VISC%R,2,T9%R,1,Z,1,C,
+     &               VISC%MAXDIM1,VISC%DIM1)
+                CALL OV_2('X=XY    ',VISC%R,3,T9%R,1,Z,1,C,
+     &               VISC%MAXDIM1,VISC%DIM1)
+             ENDIF
+
+          ELSE
+!     MULTIPLIES DIFFUSION BY HPROP
+             CALL OV_2('X=XY    ',VISC%R,1,HPROP%R,1,Z,1,C,
+     &            VISC%MAXDIM1,VISC%DIM1)
+
+             IF(VISC%DIM2.EQ.3) THEN
+                CALL OV_2('X=XY    ',VISC%R,2,HPROP%R,1,Z,1,C,
+     &               VISC%MAXDIM1,VISC%DIM1)
+                CALL OV_2('X=XY    ',VISC%R,3,HPROP%R,1,Z,1,C,
+     &               VISC%MAXDIM1,VISC%DIM1)
+             ENDIF
           ENDIF
-        ENDIF
+       ENDIF
+!===================FIN MODIFICACIÓN PROPIA ==================
 !
         CALL MATRIX(TM1,'M=N     ','MATDIF          ',IELMU,IELMU,
      &              1.D0,S,S,S,VISC,S,S,MESH,MSK,MASKEL)
 !
         IF(OPDVIT.EQ.2) THEN
-!         MULTIPLIES THE MATRIX BY 1/HPROP
-          CALL CPSTVC(HPROP,T4)
-          DO I=1,HPROP%DIM1
-!           BEWARE: HIDDEN PARAMETER 1.D-2, NO DIFFUSION BELOW 1 CM DEPTH
-!                                           WITH THIS OPTION
-            IF(HPROP%R(I).GT.1.D-2) THEN
-              T4%R(I)=1.D0/HPROP%R(I)
-            ELSE
-              T4%R(I)=0.D0
-            ENDIF
-          ENDDO
-          IF(T4%ELM.NE.IELMU) CALL CHGDIS(T4,T4%ELM,IELMU,MESH)
-          CALL OM('M=X(M)  ', M=TM1, MESH=MESH)
-          CALL OM('M=DM    ', M=TM1, D=T4, MESH=MESH)
-!         RESTORES DIFFUSION
-          CALL OS('X=Y     ',X=VISC,Y=VISC_S)
+!=====================MODIFICACIÓN PROPIA ====================
+           IF(VEGETATION_POROSITY) THEN
+              CALL CPSTVC(T9,T4)
+              DO I=1,HPROP%DIM1
+                 IF(HPROP%R(I).GT.1.D-2
+     &                .AND.T9%R(I).GT.1.D-12) THEN
+                    T4%R(I)=1.D0/T9%R(I)
+                 ELSE
+                    T4%R(I)=0.D0
+                 ENDIF
+              ENDDO
+
+           ELSE
+!     MULTIPLIES THE MATRIX BY 1/HPROP
+              CALL CPSTVC(HPROP,T4)
+              DO I=1,HPROP%DIM1
+!     BEWARE: HIDDEN PARAMETER 1.D-2, NO DIFFUSION BELOW 1 CM DEPTH
+!     WITH THIS OPTION
+                 IF(HPROP%R(I).GT.1.D-2) THEN
+                    T4%R(I)=1.D0/HPROP%R(I)
+                 ELSE
+                    T4%R(I)=0.D0
+                 ENDIF
+              ENDDO
+           ENDIF
+
+           IF(T4%ELM.NE.IELMU) CALL CHGDIS(T4,T4%ELM,IELMU,MESH)
+           CALL OM('M=X(M)  ', M=TM1, MESH=MESH)
+           CALL OM('M=DM    ', M=TM1, D=T4, MESH=MESH)
+!     RESTORES DIFFUSION
+           CALL OS('X=Y     ',X=VISC,Y=VISC_S)
         ENDIF
 !
+!===================FIN MODIFICACIÓN PROPIA ==================
         ! NELEB MAY BE NUL IN PARALLEL MODE
         IF(MESH%NELEB.GT.0) THEN
           CALL MATRIX(MBOR,'M=N     ','FMATMA          ',
@@ -588,14 +647,11 @@
 !       NORMAL MASS MATRIX
         FORMUL='MATMAS          '
       ENDIF
-      IF(OPTBAN.NE.3) THEN
-        CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
-     &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)
 !======================MODIFICACIÓN PROPIA =============================
 !     VEGETATION POROSITY EN TERMINO TEMPORAL:
 !     D(PHI*H)/DT = PHI * DH/DT
 !
-      ELSEIF(VEGETATION_POROSITY) THEN
+      IF(VEGETATION_POROSITY) THEN
 !     NODAL POROSITY -> ELEMENT POROSITY
          DO IELEM=1,MESH%NELEM
             I1=IKLE(IELEM,1)
@@ -610,6 +666,9 @@
          CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
      &        SL1,TE3,S,S,S,S,S,
      &        MESH,.TRUE.,TE1)
+      ELSEIF(OPTBAN.NE.3) THEN
+        CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
+     &              SL1,TE3,S,S,S,S,S,MESH,MSK,MASKEL)
 !====================FIN MODIFICACIÓN PROPIA ===========================
 
       ELSE
@@ -622,10 +681,9 @@
       IF(SOLSYS.EQ.1) THEN
 !
 !                           OPTBAN.NE.3 TO AVOID POROSITY IN AM2
-      IF(IELMU.EQ.IELMH.AND.OPTBAN.NE.3) THEN
-        CALL OM('M=N     ', M=AM2, N=AM1, MESH=MESH)
 !======================MODIFICACIÓN PROPIA =============================
-      ELSEIF(VEGETATION_POROSITY) THEN
+      IF(IELMU.EQ.IELMH.AND.OPTBAN.NE.3
+     &   .AND..NOT.VEGETATION_POROSITY) THEN
         CALL OM('M=N     ', M=AM2, N=AM1, MESH=MESH)
 !====================FIN MODIFICACIÓN PROPIA ===========================
       ELSE
@@ -1133,9 +1191,17 @@
 !
 !
       CALL OS('X=0     ', X=FLBOR)
-      CALL VECTOR(FLBOR,'=','FLUBDF          ',IELBOR(IELMH,1),
-     &            1.D0-TETAU,HPROP,S,S,UN,VN,S,
-     &            MESH,.TRUE.,MASK%ADR(UNONNEU)%P)
+!======================MODIFICACIÓN PROPIA =============================
+      IF(VEGETATION_POROSITY) THEN
+         CALL VECTOR(FLBOR,'=','FLUBDF          ',IELBOR(IELMH,1),
+     &        1.D0-TETAU,T9,S,S,UN,VN,S,
+     &        MESH,.TRUE.,MASK%ADR(UNONNEU)%P)
+      ELSE
+         CALL VECTOR(FLBOR,'=','FLUBDF          ',IELBOR(IELMH,1),
+     &        1.D0-TETAU,HPROP,S,S,UN,VN,S,
+     &        MESH,.TRUE.,MASK%ADR(UNONNEU)%P)
+      ENDIF
+!====================FIN MODIFICACIÓN PROPIA ===========================
 !
 !-----------------------------------------------------------------------
 !
@@ -1145,9 +1211,17 @@
 !
 !  UDIR : 1 FOR A DIRICHLET SEGMENT FOR U, 0 OTHERWISE
 !
-      CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
-     &            TETAU,HPROP,S,S,UBOR,VBOR,S,
-     &            MESH,.TRUE.,MASK%ADR(UDIR)%P)
+!======================MODIFICACIÓN PROPIA =============================
+      IF(VEGETATION_POROSITY) THEN
+         CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
+     &        TETAU,T9,S,S,UBOR,VBOR,S,
+     &        MESH,.TRUE.,MASK%ADR(UDIR)%P)
+      ELSE
+         CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
+     &        TETAU,HPROP,S,S,UBOR,VBOR,S,
+     &        MESH,.TRUE.,MASK%ADR(UDIR)%P)
+      ENDIF
+!====================FIN MODIFICACIÓN PROPIA ===========================
 !
 !  TAKES INTO ACCOUNT THE TERMS  SUM(PSI HN U(N+1) . N ) AT THE BOUNDARY
 !
@@ -1155,9 +1229,18 @@
 !
 !  UDDL : 1 FOR A FREE EXIT SEGMENT FOR U, 0 OTHERWISE
 !
-      CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
-     &            TETAU,HPROP,S,S,UN,VN,S,
-     &            MESH,.TRUE.,MASK%ADR(UDDL)%P)
+!======================MODIFICACIÓN PROPIA =============================
+      IF(VEGETATION_POROSITY) THEN
+         CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
+     &        TETAU,T9,S,S,UN,VN,S,
+     &        MESH,.TRUE.,MASK%ADR(UDDL)%P)
+      ELSE
+         CALL VECTOR(FLBOR,'+','FLUBDF          ',IELBOR(IELMH,1),
+     &        TETAU,HPROP,S,S,UN,VN,S,
+     &        MESH,.TRUE.,MASK%ADR(UDDL)%P)
+      ENDIF
+!====================FIN MODIFICACIÓN PROPIA ===========================
+!
 !
 !     WITH POROSITY
 !

@@ -401,13 +401,6 @@
 !
 !=====================MODIFICACIÓN PROPIA ====================
       ELSEIF(VEGETATION_POROSITY) THEN
-!     CREATE T9 ONLY ONCE
-!     PHI * H
-         CALL OS('X=YZ    ',
-     &        X=T9,
-     &        Y=PRIVE%ADR(1)%P,
-     &        Z=HPROP)
-
          CALL MATRIX(BM1,'M=N     ','MATFGR         X',IELMH,IELMU,
      &        TETAU,T9,S,S,S,S,S,MESH,MSK,MASKEL)
          CALL MATRIX(BM2,'M=N     ','MATFGR         Y',IELMH,IELMU,
@@ -477,6 +470,7 @@
           CALL OS('X=Y     ',X=VISC_S,Y=VISC)
 !=====================MODIFICACIÓN PROPIA ====================
           IF(VEGETATION_POROSITY) THEN
+
              CALL OV_2('X=XY    ',VISC%R,1,T9%R,1,Z,1,C,
      &            VISC%MAXDIM1,VISC%DIM1)
              
@@ -661,6 +655,9 @@
      &           ( PRIVE%ADR(1)%P%R(I1)
      &           + PRIVE%ADR(1)%P%R(I2)
      &           + PRIVE%ADR(1)%P%R(I3) ) / 3.D0
+            IF(MSK) THEN
+               TE1%R(IELEM)=TE1%R(IELEM)*MASKEL%R(IELEM)
+            ENDIF
          ENDDO
 !     AM1 = PHI / DT * MASS MATRIX
          CALL MATRIX(AM1,'M=N     ',FORMUL,IELMH,IELMH,
@@ -801,7 +798,7 @@
       IF(ICONVF(1).NE.ADV_LPO.AND.ICONVF(1).NE.ADV_LPO_TF.AND.
      &   ICONVF(1).NE.ADV_NSC.AND.ICONVF(1).NE.ADV_NSC_TF.AND.
      &   ICONVF(1).NE.ADV_PSI.AND.ICONVF(1).NE.ADV_PSI_TF     ) THEN
-        CALL OS( 'X=CY    ' , X=T1 , Y=FU , C=DT )
+       CALL OS( 'X=CY    ' , X=T1 , Y=FU , C=DT )
         CALL OS( 'X=CY    ' , X=T2 , Y=FV , C=DT )
       ENDIF
 !
@@ -1446,8 +1443,20 @@
           CALL CHGDIS(DM1,IELMU,IELMH,MESH)
         ENDIF
 !
-        CALL MATRIX(AM1,'M=M+N   ','MATDIFUV        ',IELMH,IELMH,
-     &              -1.D0,S,S,S,DM1,HPROP,S,MESH,MSK,MASKEL)
+!=====================MODIFICACIÓN PROPIA ====================
+        IF(VEGETATION_POROSITY) THEN
+           CALL MATRIX(AM1,'M=M+N   ','MATDIFUV        ',
+     &          IELMH,IELMH,
+     &          -1.D0,S,S,S,DM1,T9,S,
+     &          MESH,MSK,MASKEL)
+
+        ELSE
+          CALL MATRIX(AM1,'M=M+N   ','MATDIFUV        ',
+     &          IELMH,IELMH,
+     &          -1.D0,S,S,S,DM1,HPROP,S,
+     &          MESH,MSK,MASKEL)
+       ENDIF
+!===================FIN MODIFICACIÓN PROPIA ==================
 !
 !       NEW SECOND MEMBER CV1
 !
@@ -1511,13 +1520,29 @@
 !                        3: U AND V, HERE T2 AND T3 NOT TAKEN
           CALL OS('X=CY    ',X=T1,Y=DM1,
      &                       C=(1.D0-TETAZCOMP)/TETAH/TETAU)
-          IF(OPTBAN.EQ.1.OR.OPTBAN.EQ.3) THEN
-            CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
-     &                  HPROP,T1,ZFLATS,T2,T3,T3,MESH,MSK,MASKEL)
+!=====================MODIFICACIÓN PROPIA ====================
+          IF(VEGETATION_POROSITY) THEN
+             IF(OPTBAN.EQ.1.OR.OPTBAN.EQ.3) THEN
+                CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
+     &               T9,T1,ZFLATS,T2,T3,T3,
+     &               MESH,MSK,MASKEL)
+             ELSE
+                CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
+     &               T9,T1,T8,T2,T3,T3,
+     &               MESH,MSK,MASKEL)
+             ENDIF
           ELSE
-            CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
-     &                  HPROP,T1,T8    ,T2,T3,T3,MESH,MSK,MASKEL)
-          ENDIF
+             IF(OPTBAN.EQ.1.OR.OPTBAN.EQ.3) THEN
+                CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
+     &               HPROP,T1,ZFLATS,T2,T3,T3,
+     &               MESH,MSK,MASKEL)
+             ELSE
+               CALL VECTOR(CV1,'+',FORMUL,IELMH,TETAU,
+     &              HPROP,T1,T8,T2,T3,T3,
+     &              MESH,MSK,MASKEL)
+            ENDIF
+         ENDIF
+!===================FIN MODIFICACIÓN PROPIA ==================
         ENDIF
 !
         CALL OS('X=CY    ',X=UDEL,Y=T2,C=TETAU)

@@ -299,8 +299,14 @@
       CHARACTER(LEN=16) FORMUL
 !==================== MODIFICACIÓN PROPIA ====================
       LOGICAL, PARAMETER :: VEGETATION_POROSITY = .TRUE.
+      LOGICAL, PARAMETER :: VEGETATION_FORCHHEIMER = .TRUE.
       TYPE(BIEF_OBJ), SAVE :: T9
       LOGICAL, SAVE :: T9_CREATED = .FALSE.
+      DOUBLE PRECISION, PARAMETER :: CD_VEG  = 1.D0
+      DOUBLE PRECISION, PARAMETER :: D_VEG   = 0.01D0
+      DOUBLE PRECISION, PARAMETER :: PI_VEG = 3.141592653589793D0
+      DOUBLE PRECISION, PARAMETER :: PHI_MIN = 1.D-6
+      DOUBLE PRECISION PHI_LOC,A_LOC,VEL_LOC,KP_LOC
 !===================FIN MODIFICACIÓN PROPIA ==================
 !
 !-----------------------------------------------------------------------
@@ -1086,7 +1092,127 @@
 !
       ENDIF
 !
-!=======================================================================
+!======================MODIFICACIÓN PROPIA =============================
+!     VEGETATION DRAG - BAPTIST / FORCHHEIMER
+!
+!                       CD * A
+!     KP(|V|) = --------------------- * |V|
+!                       2 * PHI
+!
+!     FOR CYLINDRICAL STEMS:
+!
+!       PHI = 1 - M*PI*D**2/4
+!
+!       A = M*D
+!
+!     THEREFORE:
+!
+!              4*(1-PHI)
+!       A = ----------------
+!                 PI*D
+!
+!     VELOCITY MAGNITUDE:
+!
+!       |V| = SQRT(U**2 + V**2)
+!
+!     SEMI-IMPLICIT TREATMENT:
+!
+!       SX = -KP(UN,VN) * U(N+1)
+!       SY = -KP(UN,VN) * V(N+1)
+!
+      IF(VEGETATION_POROSITY .and. VEGETATION_FORCHHEIMER) THEN
+!
+!       ---------------------------------------------------------------
+!       POROSITY FIELD ON VELOCITY DISCRETISATION
+!       ---------------------------------------------------------------
+!
+        CALL CPSTVC(PRIVE%ADR(1)%P,T6)
+        CALL OS('X=Y     ',X=T6,Y=PRIVE%ADR(1)%P)
+!
+        IF(T6%ELM.NE.IELMU) THEN
+          CALL CHGDIS(T6,T6%ELM,IELMU,MESH)
+        ENDIF
+!
+!       T5 WILL CONTAIN KP
+!
+        CALL CPSTVC(U,T5)
+        CALL OS('X=0     ',X=T5)
+!
+        DO I=1,BIEF_NBPTS(IELMU,MESH)
+!
+!         POROSITY
+!
+          PHI_LOC=MIN(1.D0,MAX(T6%R(I),PHI_MIN))
+!
+!         VEGETATION EXISTS WHEN PHI < 1
+!
+          IF(PHI_LOC.LT.1.D0-1.D-12) THEN
+!
+!           ------------------------------------------------------------
+!           VELOCITY MAGNITUDE
+!           ------------------------------------------------------------
+!
+            VEL_LOC=SQRT(UN%R(I)**2+VN%R(I)**2)
+!
+!           ------------------------------------------------------------
+!           FRONTAL AREA DENSITY A [1/M]
+!
+!                     4*(1-PHI)
+!           A = -----------------------
+!                        PI*D
+!           ------------------------------------------------------------
+!
+            A_LOC=4.D0*(1.D0-PHI_LOC)
+     &            /(PI_VEG*D_VEG)
+!
+!           ------------------------------------------------------------
+!           BAPTIST / FORCHHEIMER DRAG
+!
+!                         CD*A
+!           KP = ---------------------- * |V|
+!                        2*PHI
+!           ------------------------------------------------------------
+!
+            KP_LOC=CD_VEG*A_LOC*VEL_LOC
+     &             /(2.D0*PHI_LOC)
+!
+          ELSE
+!
+!           NO VEGETATION
+!
+            KP_LOC=0.D0
+!
+          ENDIF
+!
+          T5%R(I)=KP_LOC
+!
+        ENDDO
+!
+!       ---------------------------------------------------------------
+!       MASS MATRIX CONTRIBUTION
+!       ---------------------------------------------------------------
+!
+        CALL SLOPES(TE3,ZF,MESH)
+!
+        CALL OS('X=0     ',X=T2)
+!
+        CALL VECTOR(T2,'=','MASBAS          ',IELMU,
+     &              1.D0,S,S,S,S,S,S,
+     &              MESH,.TRUE.,TE3)
+!
+!       T5 = KP * MASS
+!
+        CALL OS('X=XY    ',X=T5,Y=T2)
+!
+!       ---------------------------------------------------------------
+!       ADD VEGETATION DRAG TO U AND V
+!       ---------------------------------------------------------------
+!
+        CALL OS('X=X+Y   ',X=T3,Y=T5)
+        CALL OS('X=X+Y   ',X=T4,Y=T5)
+!
+      ENDIF
+!====================FIN MODIFICACIÓN PROPIA ===========================
 !
 !   COMPUTES THE MATRICES
 !
